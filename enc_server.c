@@ -68,18 +68,48 @@ int main(int argc, char *argv[]){
 
         // Get the message from the client and display it
         memset(buffer, '\0', 256);
+        int keyStringSize = 100;
+        char* key = malloc(sizeof(char) * (keyStringSize + 1));
         // Read the client's message from the socket
-        charsRead = recv(connectionSocket, buffer, 255, 0);
+        charsRead = recv(connectionSocket, key, keyStringSize, 0); // sending the length of the message (key)
+
         if (charsRead < 0){
             error("ERROR reading from socket");
         }
-        printf("SERVER: I received this from the client: \"%s\"\n", buffer);
+        printf("SERVER: I received this from the client: \"%s\"\n", key);
 
         // Send a Success message back to the client
-        charsRead = send(connectionSocket, "I am the server, and I got your message", 39, 0);
+        charsRead = send(connectionSocket, key, strlen(key), 0);
+        int keyInt = atoi(key);
+        int iterationsRemaining = (keyInt / 100) + 1; // getting the number of iterations that it will take to send over the entire message in chunks of 100
+        int count = 0;
+        char* plainTextMessage = malloc(sizeof(char) * (strlen(key) + 1));
+        while (iterationsRemaining != 0) {
+            iterationsRemaining--;
+            int numberOfCharsToReceive = 0;
+            if (iterationsRemaining == 0) {
+                numberOfCharsToReceive = keyInt % 100;
+                if (numberOfCharsToReceive == 0) {
+                    numberOfCharsToReceive = 100;
+                }
+            }
+            else {
+                numberOfCharsToReceive = 100;
+            }
+            char* token = malloc(sizeof(char) * (numberOfCharsToReceive + 1));
+            charsRead = recv(connectionSocket, token, numberOfCharsToReceive, 0);
+            strcat(plainTextMessage, token);
+            free(token);
+            count += numberOfCharsToReceive;
+        } // end of while loop
+        plainTextMessage[strlen(plainTextMessage)] = '\0'; // tacking on the null terminator
+
+        printf("Plain Message: %s \n", plainTextMessage);
+
         if (charsRead < 0){
             error("ERROR writing to socket");
         }
+
         // Close the connection socket for this client
         close(connectionSocket);
     } // end of while loop

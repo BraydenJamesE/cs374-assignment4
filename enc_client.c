@@ -45,18 +45,17 @@ void setupAddressStruct(struct sockaddr_in* address, int portNumber, char* hostn
 int main(int argc, char *argv[]) {
     int socketFD, portNumber, charsWritten, charsRead;
     struct sockaddr_in serverAddress;
-    char buffer[256];
     // Check usage & args
     if (argc < 4) {
         fprintf(stderr,"USAGE: %s hostname port\n", argv[0]);
         exit(0);
     }
-    char* file = malloc(sizeof(char*) + (strlen(argv[1]) + 1)); // allocating the proper size of the file
-    char* key = malloc(sizeof(char*) + (strlen(argv[2]) + 1)); // allocating the proper size of the key
+    char* file = malloc(sizeof(char) * (strlen(argv[1]) + 1)); // allocating the proper size of the file
+    char* key = malloc(sizeof(char) * (strlen(argv[2]) + 1)); // allocating the proper size of the key
     strcpy(file, argv[1]); // copying the file name from the args
     strcpy(key, argv[2]); // copying the key from args
     portNumber = atoi(argv[3]); // getting the port number
-    char* plainTextMessage = malloc(sizeof (char*) + (atoi(key) + 1));
+    char* plainTextMessage = malloc(sizeof (char) * (atoi(key) + 1));
     char allowedChars[28] = "abcdefghijklmnopqrstuvwxyz ";
     FILE* fileHandler;
     char fileCharacter;
@@ -112,33 +111,73 @@ int main(int argc, char *argv[]) {
         error("CLIENT: ERROR connecting");
     }
     // Get input message from user
-    printf("CLIENT: Enter text to send to the server, and then hit enter: ");
+    //printf("CLIENT: Enter text to send to the server, and then hit enter: ");
     // Clear out the buffer array
-    memset(buffer, '\0', sizeof(buffer));
+    //memset(buffer, '\0', sizeof(buffer));
     // Get input from the user, trunc to buffer - 1 chars, leaving \0
-    fgets(buffer, sizeof(buffer) - 1, stdin);
+    //fgets(buffer, sizeof(buffer) - 1, stdin);
     // Remove the trailing \n that fgets adds
-    buffer[strcspn(buffer, "\n")] = '\0';
+    //buffer[strcspn(buffer, "\n")] = '\0';
 
     // Send message to server
     // Write to the server
-    charsWritten = send(socketFD, buffer, strlen(buffer), 0);
-    if (charsWritten < 0){
+    charsWritten = send(socketFD, key, strlen(key), 0);
+    if (charsWritten < 0) {
         error("CLIENT: ERROR writing to socket");
     }
-    if (charsWritten < strlen(buffer)){
+    if (charsWritten < strlen(key)) {
         printf("CLIENT: WARNING: Not all data written to socket!\n");
     }
 
-    // Get return message from server
-    // Clear out the buffer again for reuse
-    memset(buffer, '\0', sizeof(buffer));
+    char* buffer = malloc(sizeof (char) * (strlen(key) + 1));
+    memset(buffer, '\0', strlen(buffer));
     // Read data from the socket, leaving \0 at end
     charsRead = recv(socketFD, buffer, sizeof(buffer) - 1, 0);
     if (charsRead < 0){
         error("CLIENT: ERROR reading from socket");
     }
     printf("CLIENT: I received this from the server: \"%s\"\n", buffer);
+
+    if (strcmp(buffer, key) != 0) { // server received proper key
+        fprintf(stderr, "Server did not receive proper key\n");
+        return 1;
+    }
+
+    memset(buffer, '\0', strlen(buffer)); // resetting the buffer to receive another message
+    int count = 0;
+    int iterationsRemaining = (strlen(plainTextMessage) / 100) + 1; // This value will hold the number of times I plan on looping.
+    while (iterationsRemaining != 0) { // sending 100 chars at a time to the server to ensure there is no error
+        iterationsRemaining--; // decrementing iterationsRemaining
+        int numberOfCharsToSend = 0;
+        if (iterationsRemaining == 0) {
+            numberOfCharsToSend = strlen(plainTextMessage) % 100;
+            if (numberOfCharsToSend == 0) {
+                numberOfCharsToSend = 100; // handling the situation where the number of chars to send is a multiple of 100.
+            }
+        }
+        else {
+            numberOfCharsToSend = 100;
+        }
+        charsWritten = send(socketFD, plainTextMessage + count, numberOfCharsToSend, 0);
+        if (charsWritten < 0) {
+            fprintf(stderr, "Error sending data\n");
+            break;
+        }
+        count += numberOfCharsToSend;
+    } // end while loop
+
+    charsRead = send(socketFD, plainTextMessage, strlen(plainTextMessage), 0);
+
+
+    if (charsWritten < 0) {
+        error("CLIENT: ERROR writing to socket");
+    }
+    if (charsWritten < strlen(plainTextMessage)) {
+        printf("CLIENT: WARNING: Not all data written to socket!\n");
+    }
+
+    // Get return message from server
+    // Clear out the buffer again for reuse
 
     // Close the socket
     close(socketFD);
