@@ -55,7 +55,7 @@ int main(int argc, char *argv[]) {
     strcpy(file, argv[1]); // copying the file name from the args
     strcpy(key, argv[2]); // copying the key from args
     portNumber = atoi(argv[3]); // getting the port number
-    char* plainTextMessage = malloc(sizeof (char) * (atoi(key) + 1));
+    char* plainTextMessage = malloc(sizeof (char) * (atoi(key) + 1)); // key must be at least as big as plainTextMessage so allocating the key as the size
     char allowedChars[28] = "abcdefghijklmnopqrstuvwxyz ";
     FILE* fileHandler;
     char fileCharacter;
@@ -71,10 +71,6 @@ int main(int argc, char *argv[]) {
         validChar = false;
         fileCharacter = fgetc(fileHandler);
         if (fileCharacter == '\n' || fileCharacter == EOF) {
-            if (charCounter != atoi(key)) { // if the key and plain text size are not exactly equal then return an error
-                plainTextMessage = NULL; // rest the plain message
-                fprintf(stderr, "Key and plain text are not equal size.\n"); // outputting the error
-            }
             break;
         }
         for (int i = 0; i < 27; i++) {
@@ -91,7 +87,7 @@ int main(int argc, char *argv[]) {
         }
         if (atoi(key) < charCounter) {
             fprintf(stderr, "plain text larger than designated key.\n");
-            break;
+            exit(EXIT_FAILURE);
         }
     } // end of while loop (true)
     fclose(fileHandler);
@@ -110,18 +106,10 @@ int main(int argc, char *argv[]) {
     if (connect(socketFD, (struct sockaddr*)&serverAddress, sizeof(serverAddress)) < 0){
         error("CLIENT: ERROR connecting");
     }
-    // Get input message from user
-    //printf("CLIENT: Enter text to send to the server, and then hit enter: ");
-    // Clear out the buffer array
-    //memset(buffer, '\0', sizeof(buffer));
-    // Get input from the user, trunc to buffer - 1 chars, leaving \0
-    //fgets(buffer, sizeof(buffer) - 1, stdin);
-    // Remove the trailing \n that fgets adds
-    //buffer[strcspn(buffer, "\n")] = '\0';
 
     // Send message to server
     // Write to the server
-    charsWritten = send(socketFD, key, strlen(key), 0);
+    charsWritten = send(socketFD, key, strlen(key), 0); // sending the key to the server
     if (charsWritten < 0) {
         error("CLIENT: ERROR writing to socket");
     }
@@ -136,12 +124,15 @@ int main(int argc, char *argv[]) {
     if (charsRead < 0){
         error("CLIENT: ERROR reading from socket");
     }
-    printf("CLIENT: I received this from the server: \"%s\"\n", buffer);
 
     if (strcmp(buffer, key) != 0) { // server received proper key
         fprintf(stderr, "Server did not receive proper key\n");
-        return 1;
+        exit(EXIT_FAILURE);
     }
+    char* plainTextMessageSize = malloc(sizeof(char) + (strlen(plainTextMessage) + 1));
+    sprintf(plainTextMessageSize, "%d", strlen(plainTextMessage));
+    charsWritten = send(socketFD, plainTextMessageSize, strlen(plainTextMessage), 0);
+
 
     memset(buffer, '\0', strlen(buffer)); // resetting the buffer to receive another message
     int count = 0;
@@ -159,27 +150,20 @@ int main(int argc, char *argv[]) {
             numberOfCharsToSend = 100;
         }
         charsWritten = send(socketFD, plainTextMessage + count, numberOfCharsToSend, 0);
+        printf("%d: %s\n", iterationsRemaining, plainTextMessage + count);
+        printf("chars Written: %d\n", charsWritten);
         if (charsWritten < 0) {
             fprintf(stderr, "Error sending data\n");
             break;
         }
+        if (charsWritten < numberOfCharsToSend) {
+            fprintf(stderr, "CLIENT: WARNING: Not all data written to socket!\n");
+        }
         count += numberOfCharsToSend;
     } // end while loop
 
-    charsRead = send(socketFD, plainTextMessage, strlen(plainTextMessage), 0);
 
 
-    if (charsWritten < 0) {
-        error("CLIENT: ERROR writing to socket");
-    }
-    if (charsWritten < strlen(plainTextMessage)) {
-        printf("CLIENT: WARNING: Not all data written to socket!\n");
-    }
-
-    // Get return message from server
-    // Clear out the buffer again for reuse
-
-    // Close the socket
-    close(socketFD);
+    close(socketFD); // Close the socket
     return 0;
 }

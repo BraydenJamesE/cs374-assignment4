@@ -28,10 +28,11 @@ void setupAddressStruct(struct sockaddr_in* address, int portNumber){
 }
 
 int main(int argc, char *argv[]){
-    int connectionSocket, charsRead;
+    int connectionSocket, charsRead, charsWritten;
     char buffer[256];
     struct sockaddr_in serverAddress, clientAddress;
     socklen_t sizeOfClientInfo = sizeof(clientAddress);
+    char allowedChars[28] = "abcdefghijklmnopqrstuvwxyz ";
 
     // Check usage & args
     if (argc < 2) {
@@ -79,7 +80,11 @@ int main(int argc, char *argv[]){
         printf("SERVER: I received this from the client: \"%s\"\n", key);
 
         // Send a Success message back to the client
-        charsRead = send(connectionSocket, key, strlen(key), 0);
+        char* plainMessageSizeString = malloc(sizeof(char) + 1000);
+        charsWritten = send(connectionSocket, key, strlen(key), 0);
+        charsRead = recv(connectionSocket, plainMessageSizeString, 1000, 0);
+        int plainMessageSize = atoi(plainMessageSizeString);
+
         int keyInt = atoi(key);
         int iterationsRemaining = (keyInt / 100) + 1; // getting the number of iterations that it will take to send over the entire message in chunks of 100
         int count = 0;
@@ -92,17 +97,33 @@ int main(int argc, char *argv[]){
                 if (numberOfCharsToReceive == 0) {
                     numberOfCharsToReceive = 100;
                 }
-            }
-            else {
+            } else {
                 numberOfCharsToReceive = 100;
             }
-            char* token = malloc(sizeof(char) * (numberOfCharsToReceive + 1));
+            char *token = malloc(sizeof(char) * (numberOfCharsToReceive + 1));
             charsRead = recv(connectionSocket, token, numberOfCharsToReceive, 0);
+            bool containsOnlyValidChars = false;
+
+            for (int i = 0; i < numberOfCharsToReceive; i++) { // looping through each char received and ensuring that it is in the valid chars array. If one of the chars received is not in the valid chars array, exit the program as the plain text is not valid.
+                for (int j = 0; j < 27; j++) {
+                    if (token[i] == allowedChars[j]) {
+                        containsOnlyValidChars = true;
+                    }
+                }
+                if (containsOnlyValidChars == false) {
+                    fprintf(stderr, "Does not contain only valid chars \n");
+                    exit(EXIT_FAILURE);
+                }
+            }
+
+            printf("%d: %s\n", iterationsRemaining, token);
             strcat(plainTextMessage, token);
             free(token);
             count += numberOfCharsToReceive;
         } // end of while loop
         plainTextMessage[strlen(plainTextMessage)] = '\0'; // tacking on the null terminator
+
+
 
         printf("Plain Message: %s \n", plainTextMessage);
 
