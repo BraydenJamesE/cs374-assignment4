@@ -73,27 +73,26 @@ int main(int argc, char *argv[]){
         char* key = malloc(sizeof(char) * (keyStringSize + 1));
         // Read the client's message from the socket
         charsRead = recv(connectionSocket, key, keyStringSize, 0); // sending the length of the message (key)
-
         if (charsRead < 0){
             error("ERROR reading from socket");
         }
         printf("SERVER: I received this from the client: \"%s\"\n", key);
 
         // Send a Success message back to the client
-        char* plainMessageSizeString = malloc(sizeof(char) + 1000);
+        char* plainMessageSizeString = malloc(sizeof(char) * 1000);
         charsWritten = send(connectionSocket, key, strlen(key), 0);
-        charsRead = recv(connectionSocket, plainMessageSizeString, 1000, 0);
+        charsRead = recv(connectionSocket, plainMessageSizeString, 999, 0);
         int plainMessageSize = atoi(plainMessageSizeString);
 
         int keyInt = atoi(key);
-        int iterationsRemaining = (keyInt / 100) + 1; // getting the number of iterations that it will take to send over the entire message in chunks of 100
+        int iterationsRemaining = (plainMessageSize / 100) + 1; // getting the number of iterations that it will take to send over the entire message in chunks of 100
         int count = 0;
-        char* plainTextMessage = malloc(sizeof(char) * (strlen(key) + 1));
+        char* plainTextMessage = calloc(keyInt + 1, sizeof(char));
         while (iterationsRemaining != 0) {
-            iterationsRemaining--;
+
             int numberOfCharsToReceive = 0;
-            if (iterationsRemaining == 0) {
-                numberOfCharsToReceive = keyInt % 100;
+            if (iterationsRemaining == 1) {
+                numberOfCharsToReceive = plainMessageSize % 100;
                 if (numberOfCharsToReceive == 0) {
                     numberOfCharsToReceive = 100;
                 }
@@ -103,14 +102,16 @@ int main(int argc, char *argv[]){
             char *token = malloc(sizeof(char) * (numberOfCharsToReceive + 1));
             charsRead = recv(connectionSocket, token, numberOfCharsToReceive, 0);
             bool containsOnlyValidChars = false;
-
+            char charOfInterest;
             for (int i = 0; i < numberOfCharsToReceive; i++) { // looping through each char received and ensuring that it is in the valid chars array. If one of the chars received is not in the valid chars array, exit the program as the plain text is not valid.
-                for (int j = 0; j < 27; j++) {
+                for (int j = 0; j < 28; j++) {
                     if (token[i] == allowedChars[j]) {
                         containsOnlyValidChars = true;
                     }
+                    charOfInterest = token[i];
                 }
                 if (containsOnlyValidChars == false) {
+                    printf("CharOfInterest: %c \n", charOfInterest);
                     fprintf(stderr, "Does not contain only valid chars \n");
                     exit(EXIT_FAILURE);
                 }
@@ -120,6 +121,7 @@ int main(int argc, char *argv[]){
             strcat(plainTextMessage, token);
             free(token);
             count += numberOfCharsToReceive;
+            iterationsRemaining--;
         } // end of while loop
         plainTextMessage[strlen(plainTextMessage)] = '\0'; // tacking on the null terminator
 
