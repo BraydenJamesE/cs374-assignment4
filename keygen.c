@@ -4,7 +4,7 @@
 
 int main(int argc, char** argv) {
     srand(time(NULL)); // seeding random
-    char keyValues[28] = "abcdefghijklmnopqrstuvwxyz "; // creating the string that will be used to find the key text. These chars will be selected by random index
+    char keyValues[28] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ "; // creating the string that will be used to find the key text. These chars will be selected by random index
     if (argc == 2) { // ensuring expected length of args before using them; ensures proper input from user and ensures that we are not out of bounds when accessing various elements of argv
         int keySize = atoi(argv[1]); // converting the key to an int
         char keyString[keySize + 1]; // creating a variable to store the key string

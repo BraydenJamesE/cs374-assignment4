@@ -9,14 +9,23 @@
 
 #define BUFFER_SIZE 1024
 
+char allowedChars[28] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ ";
 
-// Error function used for reporting issues
 void error(const char *msg) {
     perror(msg);
     exit(1);
-}
+} // end of "error" function
 
-// Set up the address struct for the server socket
+
+int getCharIndex(char desiredChar) {
+    for (int i = 0; i < 27; i++) {
+        if (allowedChars[i] == desiredChar) return i;
+    }
+    fprintf(stderr, "getCharIndex was unable to locate the desired char in the allowedChars array.\n");
+    return -1;
+} // end of "getCharIndex" function
+
+
 void setupAddressStruct(struct sockaddr_in* address, int portNumber){
 
     // Clear out the address struct
@@ -37,7 +46,6 @@ int main(int argc, char *argv[]){
     char* keyFile = malloc(sizeof(char) * 256);
     struct sockaddr_in serverAddress, clientAddress;
     socklen_t sizeOfClientInfo = sizeof(clientAddress);
-    char allowedChars[28] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ ";
 
     // Check usage & args
     if (argc < 2) {
@@ -159,8 +167,36 @@ int main(int argc, char *argv[]){
 
         printf("Plain Message: %s \n", plainTextMessage);
 
-        // encrypt the plainTextMessage
+        char* keyText = malloc(sizeof(char) * (keySizeInt + 1));
+        FILE* fileHandler = fopen(keyFile, "r");
+        if (fileHandler == NULL) {
+            fprintf(stderr, "Failed to open keyFile: %s \n", keyFile);
+            exit(EXIT_FAILURE);
+        }
 
+        char ch;
+        int index = 0;
+        while (true) { // reading the contents of the key into a variable
+            ch = fgetc(fileHandler);
+            if (ch == '\n' || ch == '\0' || index > keySizeInt) break;
+            else keyText[index++] = ch;
+        } // end of while loop
+
+        if (strlen(plainTextMessage) > keySizeInt) { // checking bounds before accessing chars in the keyText in the loop
+            fprintf(stderr, "Key size less than plainText size. Error.\n");
+            exit(EXIT_FAILURE);
+        }
+        char* encryptedText = malloc(sizeof(char) * (strlen(plainTextMessage) + 1)); // creating the encryptedText string
+        for (int i = 0; i < strlen(plainTextMessage); i++) { // encrypt the plainTextMessage
+            int plainCharIndex = getCharIndex(plainTextMessage[i]);
+            int keyCharIndex = getCharIndex(keyText[i]);
+            int newCharIndex = (plainCharIndex + keyCharIndex) % 27; // encrypting the plain text char
+            char encryptedChar = allowedChars[newCharIndex];
+            encryptedText[i] = encryptedChar;
+        } // end of for loop
+
+        printf("PlainText: %s \n", plainTextMessage);
+        printf("Encrypted Text: %s \n", encryptedText);
 
         // Close the connection socket for this client
         close(connectionSocket);
