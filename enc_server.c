@@ -7,6 +7,9 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 
+#define BUFFER_SIZE 1024
+
+
 // Error function used for reporting issues
 void error(const char *msg) {
     perror(msg);
@@ -29,10 +32,12 @@ void setupAddressStruct(struct sockaddr_in* address, int portNumber){
 
 int main(int argc, char *argv[]){
     int connectionSocket, charsRead, charsWritten;
-    char buffer[256];
+    char buffer[BUFFER_SIZE];
+    char ack[15] = "ACK: received.";
+    char* keyFile = malloc(sizeof(char) * 256);
     struct sockaddr_in serverAddress, clientAddress;
     socklen_t sizeOfClientInfo = sizeof(clientAddress);
-    char allowedChars[28] = "abcdefghijklmnopqrstuvwxyz ";
+    char allowedChars[28] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ ";
 
     // Check usage & args
     if (argc < 2) {
@@ -43,7 +48,8 @@ int main(int argc, char *argv[]){
     // Create the socket that will listen for connections
     int listenSocket = socket(AF_INET, SOCK_STREAM, 0);
     if (listenSocket < 0) {
-        error("ERROR opening socket");
+        fprintf(stderr, "ERROR opening socket");
+        exit(EXIT_FAILURE);
     }
 
     // Set up the address struct for the server socket
@@ -62,76 +68,99 @@ int main(int argc, char *argv[]){
         // Accept the connection request which creates a connection socket
         connectionSocket = accept(listenSocket, (struct sockaddr *)&clientAddress, &sizeOfClientInfo);
         if (connectionSocket < 0){
-            error("ERROR on accept");
+            fprintf(stderr, "ERROR on accept");
         }
 
         printf("SERVER: Connected to client running at host %d port %d\n", ntohs(clientAddress.sin_addr.s_addr), ntohs(clientAddress.sin_port));
 
         // Get the message from the client and display it
+
         memset(buffer, '\0', 256);
-        int keyStringSize = 100;
-        char* key = malloc(sizeof(char) * (keyStringSize + 1));
-        // Read the client's message from the socket
-        charsRead = recv(connectionSocket, key, keyStringSize, 0); // sending the length of the message (key)
+        // reading the Key Size from the socket
+        charsRead = recv(connectionSocket, buffer, BUFFER_SIZE - 1, 0); // getting the length of the key
         if (charsRead < 0){
-            error("ERROR reading from socket");
+            error("ERROR reading Key Size from socket");
         }
-        printf("SERVER: I received this from the client: \"%s\"\n", key);
+        buffer[charsRead] = '\0';
+        charsWritten = send(connectionSocket, ack, 14, 0); // sending an ack to the client
 
-        // Send a Success message back to the client
-        char* plainMessageSizeString = malloc(sizeof(char) * 1000);
-        charsWritten = send(connectionSocket, key, strlen(key), 0);
-        charsRead = recv(connectionSocket, plainMessageSizeString, 999, 0);
-        int plainMessageSize = atoi(plainMessageSizeString);
+        int keyStringSize = 255;
+        char* keySize = malloc(sizeof(char) * (keyStringSize + 1));
+        strcpy(keySize, buffer); // assigning the buffer value to the keySize
+        printf("SERVER: I received keyStringSize from the client: \"%s\"\n", keySize);
 
-        int keyInt = atoi(key);
+        memset(buffer, '\0', 256);
+        charsRead = recv(connectionSocket, buffer, BUFFER_SIZE - 1, 0); // getting the file path to the key
+        if (charsRead < 0) fprintf(stderr, "ERROR reading Key Size from socket");
+
+        buffer[charsRead] = '\0';
+        charsWritten = send(connectionSocket, ack, 14, 0); // sending an ack to the client for the keyFile
+        strcpy(keyFile, buffer);
+        printf("Received the keyFile from the client: %s \n", keyFile);
+
+
+        memset(buffer, '\0', BUFFER_SIZE);
+        charsRead = recv(connectionSocket, buffer, BUFFER_SIZE - 1, 0);
+        if (charsRead < 0) {
+            fprintf(stderr, "Error reading plain message size from socket\n");
+        }
+        buffer[charsRead] = '\0';
+        charsWritten = send(connectionSocket, ack, 14, 0); // sending an ack to the client
+        printf("SERVER: I received plainMessageSize from the client: %s \n", buffer);
+        int plainMessageSize = atoi(buffer);
+
+
+        int keySizeInt = atoi(keySize);
         int iterationsRemaining = (plainMessageSize / 100) + 1; // getting the number of iterations that it will take to send over the entire message in chunks of 100
         int count = 0;
-        char* plainTextMessage = calloc(keyInt + 1, sizeof(char));
-        while (iterationsRemaining != 0) {
+        char* plainTextMessage = calloc(keySizeInt + 1, sizeof(char));
+        if (plainTextMessage == NULL) fprintf(stderr, "Error allocating memory for plainTextMessage\n");
 
-            int numberOfCharsToReceive = 0;
-            if (iterationsRemaining == 1) {
-                numberOfCharsToReceive = plainMessageSize % 100;
-                if (numberOfCharsToReceive == 0) {
-                    numberOfCharsToReceive = 100;
-                }
-            } else {
+        int iterations = 0;
+        while (iterationsRemaining != 0) {
+            iterations += 1;
+            int numberOfCharsToReceive = (iterationsRemaining == 1) ? (plainMessageSize % 100) : 100;
+            if (numberOfCharsToReceive == 0) {
                 numberOfCharsToReceive = 100;
             }
-            char *token = malloc(sizeof(char) * (numberOfCharsToReceive + 1));
-            charsRead = recv(connectionSocket, token, numberOfCharsToReceive, 0);
+            memset(buffer, '\0', BUFFER_SIZE);
+            charsRead = recv(connectionSocket, buffer, numberOfCharsToReceive, 0); // getting a portion of the plain message from the client
+            if (charsRead < 0) {
+                fprintf(stderr, "Error reading plaintext from socket on iteration %d \n", count);
+            }
+            charsWritten = send(connectionSocket, ack, 14, 0); // sending an ack to the client
+            printf("SERVER: I received plainMessage (iteration: %d) from the client: %s \n", iterations, buffer);
+            printf("Expected Chars Read: %d\n", numberOfCharsToReceive);
+            printf("Actual Chars Read: %d\n", charsRead);
+
             bool containsOnlyValidChars = false;
             char charOfInterest;
             for (int i = 0; i < numberOfCharsToReceive; i++) { // looping through each char received and ensuring that it is in the valid chars array. If one of the chars received is not in the valid chars array, exit the program as the plain text is not valid.
                 for (int j = 0; j < 28; j++) {
-                    if (token[i] == allowedChars[j]) {
+                    if (buffer[i] == allowedChars[j]) {
                         containsOnlyValidChars = true;
+                        break;
                     }
-                    charOfInterest = token[i];
                 }
-                if (containsOnlyValidChars == false) {
+                if (!containsOnlyValidChars) {
+                    charOfInterest = buffer[i];
                     printf("CharOfInterest: %c \n", charOfInterest);
                     fprintf(stderr, "Does not contain only valid chars \n");
                     exit(EXIT_FAILURE);
                 }
             }
 
-            printf("%d: %s\n", iterationsRemaining, token);
-            strcat(plainTextMessage, token);
-            free(token);
+            strcat(plainTextMessage, buffer);
             count += numberOfCharsToReceive;
             iterationsRemaining--;
         } // end of while loop
+
         plainTextMessage[strlen(plainTextMessage)] = '\0'; // tacking on the null terminator
-
-
 
         printf("Plain Message: %s \n", plainTextMessage);
 
-        if (charsRead < 0){
-            error("ERROR writing to socket");
-        }
+        // encrypt the plainTextMessage
+
 
         // Close the connection socket for this client
         close(connectionSocket);

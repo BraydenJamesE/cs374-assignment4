@@ -14,6 +14,20 @@
 * 3. Print the message received from the server and exit the program.
 */
 
+long getFileSize(const char *filename) {
+    FILE *file = fopen(filename, "r");  // open the file in read mode
+    if (file == NULL) {
+        fprintf(stderr, "Failed to open file %s\n", filename);
+        exit(EXIT_FAILURE);
+    }
+
+    fseek(file, 0, SEEK_END);  // move the file pointer to the end of the file
+    long size = ftell(file);   // get the current file pointer position, which is the size
+    fclose(file);              // Close the file
+    return size - 1; // removing the newline from the file size
+} // end of "getFileSize" function
+
+
 // Error function used for reporting issues
 void error(const char *msg) {
     perror(msg);
@@ -45,53 +59,62 @@ void setupAddressStruct(struct sockaddr_in* address, int portNumber, char* hostn
 int main(int argc, char *argv[]) {
     int socketFD, portNumber, charsWritten, charsRead;
     struct sockaddr_in serverAddress;
+    char ack[15] = "ACK: received.";
+    char* ackToken = malloc(sizeof(char) * (15));
     // Check usage & args
     if (argc < 4) {
-        fprintf(stderr,"USAGE: %s file key port\n", argv[0]);
+        fprintf(stderr, "USAGE: %s file key port\n", argv[0]);
         exit(0);
     }
-    char* file = malloc(sizeof(char) * (strlen(argv[1]) + 1)); // allocating the proper size of the file
-    char* key = malloc(sizeof(char) * (strlen(argv[2]) + 1)); // allocating the proper size of the key
-    strcpy(file, argv[1]); // copying the file name from the args
-    strcpy(key, argv[2]); // copying the key from args
-    portNumber = atoi(argv[3]); // getting the port number
-    char* plainTextMessage = calloc(atoi(key) + 1, sizeof(char)); // key must be at least as big as plainTextMessage so allocating the key as the size
-    char allowedChars[28] = "abcdefghijklmnopqrstuvwxyz ";
-    FILE* fileHandler;
-    char fileCharacter;
-    int charCounter = 0;
-    bool validChar = false;
 
+    char* file = argv[1]; // allocating the proper size of the file
+    char* keyFile = argv[2]; // creating a filename variable that holds that maxsize of 256; this is the maximum size a file name can be in linux including the null terminator
+    portNumber = atoi(argv[3]); // getting the port number
+
+    long keySize = getFileSize(keyFile);
+    char* plainTextMessage = calloc(keySize + 1, sizeof(char)); // key must be at least as big as plainTextMessage so allocating the key as the size
+    char allowedChars[28] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ ";
+
+    FILE* fileHandler;
     fileHandler = fopen(file, "rb");
     if (fileHandler == NULL) {
-        fprintf(stderr, "File does not exist");
+        fprintf(stderr, "File (%s) does not exist\n", file);
+        exit(EXIT_FAILURE);
     }
 
+    char fileCharacter;
+    int charCounter = 0;
+    char charOfInterest;
+    int charOfInterestLocation = 0;
+
     while (true) {
-        validChar = false;
         fileCharacter = fgetc(fileHandler);
-        if (fileCharacter == '\n' || fileCharacter == EOF) {
-            break;
-        }
+        if (fileCharacter == '\n' || fileCharacter == EOF) break;
+        bool validChar = false;
         for (int i = 0; i < 28; i++) {
             if (fileCharacter == allowedChars[i]) {
                 validChar = true;
+                break;
             }
+            charOfInterest = fileCharacter;
+            charOfInterestLocation = i;
         } // end of for loop (i)
-        if (validChar == true) {
-            plainTextMessage[charCounter++] = fileCharacter;
-        }
-        else {
-            fprintf(stderr, "Invalid Character in plain text \n");
+        if (!validChar) {
+
+            fprintf(stderr, "Invalid Character in plain text. Character in question is %c at location %d \n", charOfInterest, charOfInterestLocation);
             break;
         }
-        if (atoi(key) < charCounter) {
+        plainTextMessage[charCounter++] = fileCharacter;
+
+        if (keySize < charCounter) {
             fprintf(stderr, "plain text larger than designated key.\n");
             exit(EXIT_FAILURE);
         }
     } // end of while loop (true)
     fclose(fileHandler);
     plainTextMessage[charCounter] = '\0';
+    printf("PlainTextMessage:\n %s\n", plainTextMessage);
+    printf("PlainTextMessage: %ld\n", strlen(plainTextMessage));
 
     // Create a socket
     socketFD = socket(AF_INET, SOCK_STREAM, 0);
@@ -100,78 +123,83 @@ int main(int argc, char *argv[]) {
     }
 
     // Set up the server address struct
-    char* hostName = "localhost";
-    setupAddressStruct(&serverAddress, portNumber, hostName);
+    setupAddressStruct(&serverAddress, portNumber, "localhost");
 
     // Connect to server
-    if (connect(socketFD, (struct sockaddr*)&serverAddress, sizeof(serverAddress)) < 0){
-        error("CLIENT: ERROR connecting");
+    if (connect(socketFD, (struct sockaddr*)&serverAddress, sizeof(serverAddress)) < 0) {
+        fprintf(stderr, "CLIENT: ERROR connecting\n");
     }
 
     // Send message to server
     // Write to the server
-    charsWritten = send(socketFD, key, strlen(key), 0); // sending the key to the server
+    char* keySizeString = malloc(sizeof(char) * (256));
+    sprintf(keySizeString, "%ld", keySize);
+
+    charsWritten = send(socketFD, keySizeString, strlen(keySizeString) + 1, 0); // sending the key size to the server
+    memset(ackToken, '\0', 15);
+    charsRead = recv(socketFD, ackToken, 14, 0); // ensuring that I get an ack from the server
+
+    charsWritten = send(socketFD, keyFile, strlen(keyFile) + 1, 0);  // sending the keyFile to the server
+    if (charsWritten < 0) fprintf(stderr, "Error writing keyFile to server \n");
+    memset(ackToken, '\0', 15);
+    charsRead = recv(socketFD, ackToken, 14, 0); // ensuring that I get an ack from the server
+
+
     if (charsWritten < 0) {
         error("CLIENT: ERROR writing to socket");
     }
-    if (charsWritten < strlen(key)) {
+    if (charsWritten < strlen(keySizeString)) {
         printf("CLIENT: WARNING: Not all data written to socket!\n");
     }
+    printf("CLIENT: I sent KeySizeString to the server: %s\n", keySizeString);
 
-    char* buffer = malloc(sizeof (char) * (strlen(key) + 1));
-    memset(buffer, '\0', strlen(buffer));
-    charsRead = recv(socketFD, buffer, sizeof(buffer) - 1, 0);
-    if (charsRead < 0){
-        error("CLIENT: ERROR reading from socket");
-    }
-
-    if (strcmp(buffer, key) != 0) { // server received proper key
-        fprintf(stderr, "Server did not receive proper key\n");
-        exit(EXIT_FAILURE);
-    }
     char* plainTextMessageSizeString = malloc(sizeof(char) * (strlen(plainTextMessage) + 1));
     sprintf(plainTextMessageSizeString, "%lu", strlen(plainTextMessage));
-    charsWritten = send(socketFD, plainTextMessageSizeString, strlen(plainTextMessage) + 1, 0);
+    charsWritten = send(socketFD, plainTextMessageSizeString, strlen(plainTextMessageSizeString) + 1, 0);
+    if (charsWritten < 0) fprintf(stderr, "Error writing plainMessageSizeString to server\n");
+    printf("CLIENT: I sent plainTextMessageSizeString to the server: %s\n", plainTextMessageSizeString);
+    memset(ackToken, '\0', 15);
+    charsRead = recv(socketFD, ackToken, 14, 0); // ensuring that I get an ack from the server
+
     int plainTextSize = atoi(plainTextMessageSizeString);
-
-
-    memset(buffer, '\0', strlen(buffer)); // resetting the buffer to receive another message
+    int iterationsRemaining = (plainTextSize / 100) + 1; // This value will hold the number of times I plan on looping.
     int count = 0;
-    int iterationsRemaining = plainTextSize / 100 + 1; // This value will hold the number of times I plan on looping.
-    printf("Stringlength of pliantext: %lu \n", strlen("asldfhslfkj flsdajfldsj asdfljlasfj dsfghhal asjjflg  aljs fasldjg  aslfjlhg as  ghoahd g aohgsajg lashhgoagasdfasflsjf"));
+    int iterations = 0;
     while (iterationsRemaining != 0) { // sending 100 chars at a time to the server to ensure there is no error
+        iterations += 1;
+        int numberOfCharsToSend = (iterationsRemaining == 1) ? (plainTextSize % 100) : 100;
+        if (numberOfCharsToSend == 0) {
+            numberOfCharsToSend = 100; // handling the situation where the number of chars to send is a multiple of 100.
+        }
 
-        int numberOfCharsToSend = 0;
-        if (iterationsRemaining == 1) {
-            numberOfCharsToSend = plainTextSize % 100;
-            if (numberOfCharsToSend == 0) {
-                numberOfCharsToSend = 100; // handling the situation where the number of chars to send is a multiple of 100.
-            }
-        }
-        else {
-            numberOfCharsToSend = 100;
-        }
         printf("numberOfCharsToReceive: %d\n", numberOfCharsToSend);
 
         charsWritten = send(socketFD, plainTextMessage + count, numberOfCharsToSend, 0);
-        if (charsWritten < 0) {
-            fprintf(stderr, "CLIENT: ERROR writing data to socket\n");
+        if (charsWritten < 0) fprintf(stderr, "CLIENT: ERROR writing plaintextMessage to socket on iteration %d\n", count);
+
+        memset(ackToken, '\0', 15);
+        charsRead = recv(socketFD, ackToken, 14, 0); // ensuring that I get an ack from the server
+
+        char* token = malloc(sizeof(char) * numberOfCharsToSend);
+        for (int i = 0; i < numberOfCharsToSend; i++) {
+            token[i] = (plainTextMessage + count)[i];
         }
-        printf("%d: %s\n", iterationsRemaining, plainTextMessage + count);
+        printf("CLIENT: I sent plaintextMessage (iteration: %d) to the server: %s\n", iterations, token);
+        printf("Expected chars Written: %d \n", numberOfCharsToSend);
+        printf("Actual chars Written: %d \n", charsWritten);
+
         printf("chars Written: %d\n", charsWritten);
-        if (charsWritten < 0) {
-            fprintf(stderr, "Error sending data\n");
-            break;
-        }
-        if (charsWritten < numberOfCharsToSend) {
-            fprintf(stderr, "CLIENT: WARNING: Not all data written to socket!\n");
-        }
+        if (charsWritten < 0) fprintf(stderr, "Error sending data\n");
+
+        if (charsWritten < numberOfCharsToSend) fprintf(stderr, "CLIENT: WARNING: Not all data written to socket!\n");
         count += numberOfCharsToSend;
         iterationsRemaining--; // decrementing iterationsRemaining
+        free(token);
     } // end while loop
 
 
 
     close(socketFD); // Close the socket
+    free(plainTextMessage);
     return 0;
 }
