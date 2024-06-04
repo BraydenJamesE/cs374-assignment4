@@ -9,6 +9,7 @@
 
 
 #define BUFFER_SIZE 1024
+char* clientID = "2";
 
 long getFileSize(const char *filename) {
     FILE *file = fopen(filename, "r");  // open the file in read mode
@@ -56,8 +57,13 @@ int main(int argc, char *argv[]) {
     int socketFD, portNumber, charsWritten, charsRead;
     struct sockaddr_in serverAddress;
     char buffer[BUFFER_SIZE];
+    size_t sizeofBuffer = sizeof(buffer);
     char ack[15] = "ACK: received.";
-    char* ackToken = malloc(sizeof(char) * (15));
+    int lengthOfAck = strlen(ack);
+    int ackTokenSize = 255;
+    char* ackToken = malloc(sizeof(char) * (ackTokenSize + 1));
+    size_t sizeofAckToken = sizeof(ackToken);
+
     // Check usage & args
     if (argc < 4) {
         fprintf(stderr, "USAGE: %s file key port\n", argv[0]);
@@ -79,6 +85,10 @@ int main(int argc, char *argv[]) {
         exit(EXIT_FAILURE);
     }
 
+
+    /*
+     * Copying file contents into plainText var
+     */
     char fileCharacter;
     int charCounter = 0;
     char charOfInterest;
@@ -123,21 +133,58 @@ int main(int argc, char *argv[]) {
     // Connect to server
     if (connect(socketFD, (struct sockaddr*)&serverAddress, sizeof(serverAddress)) < 0) {
         fprintf(stderr, "CLIENT: ERROR connecting\n");
+        return 2;
     }
 
-    // Send message to server
-    // Write to the server
-    char* keySizeString = malloc(sizeof(char) * (256));
+
+
+    /*
+     * Sending ID's
+     * */
+    char* serverIDToken = malloc(sizeof(char) * 256);
+    size_t sizeofServerIDToken = sizeof(serverIDToken);
+    memset(serverIDToken, '\0', sizeofServerIDToken);
+    charsRead = recv(socketFD, serverIDToken, 1, 0);
+    if (charsRead < 0) perror("Error reading the clientIDToken \n");
+    charsWritten = send(socketFD, clientID, strlen(clientID), 0);
+    if (charsWritten < 0) perror("Error in writing to client the serverID\n");
+    if (strcmp(serverIDToken, clientID) != 0) {
+        perror("Client attempted to access server that does not share access ID. Closing connection.. \n");
+        close(socketFD); // close the socket
+        return 2; // returning 2
+    }
+
+
+
+
+    /*
+    *  Sending keySizeString
+    * */
+    memset(buffer, '\0', sizeofBuffer);
+    char* keySizeString = malloc(sizeof(char) * (BUFFER_SIZE));
+    size_t sizeofKeySizeString = sizeof(keySizeString);
+    memset(keySizeString, '\0', sizeofKeySizeString);
     sprintf(keySizeString, "%ld", keySize);
-
-    charsWritten = send(socketFD, keySizeString, strlen(keySizeString) + 1, 0); // sending the key size to the server
-    memset(ackToken, '\0', 15);
+    strcpy(buffer, keySizeString);
+    charsWritten = send(socketFD, buffer, BUFFER_SIZE - 1, 0); // sending the key size to the server
+    if (charsWritten < 0) perror("Error writing keySizeString to server \n");
+    memset(ackToken, '\0', sizeofAckToken);
     charsRead = recv(socketFD, ackToken, 14, 0); // ensuring that I get an ack from the server
 
-    charsWritten = send(socketFD, keyFile, strlen(keyFile) + 1, 0);  // sending the keyFile to the server
+
+
+
+    /*
+    *   Sending the keyFile to the server
+    * */
+    memset(buffer, '\0', sizeofBuffer);
+    strcpy(buffer, keyFile);
+    charsWritten = send(socketFD, buffer, BUFFER_SIZE - 1, 0);  // sending the keyFile to the server
     if (charsWritten < 0) fprintf(stderr, "Error writing keyFile to server \n");
-    memset(ackToken, '\0', 15);
-    charsRead = recv(socketFD, ackToken, 14, 0); // ensuring that I get an ack from the server
+    if (charsWritten < strlen(keySizeString)) fprintf(stderr, "CLIENT: WARNING: Not all data written to socket!\n");
+    memset(ackToken, '\0', sizeofAckToken);
+    charsRead = recv(socketFD, ackToken, lengthOfAck, 0); // ensuring that I get an ack from the server
+    if (charsRead < 0) perror("Error sending the ack after sending keyFile\n");
 
 
     if (charsWritten < 0) {
@@ -146,14 +193,29 @@ int main(int argc, char *argv[]) {
     if (charsWritten < strlen(keySizeString)) fprintf(stderr, "CLIENT: WARNING: Not all data written to socket!\n");
 
 
+
+
+    /*
+     *  Sending the plainMessageSizeString to the server
+     * */
     char* cypherTextMessageSizeString = malloc(sizeof(char) * (strlen(cypherText) + 1));
+    size_t sizeofCypherTextMessageSizeString = sizeof(cypherTextMessageSizeString);
+    memset(cypherTextMessageSizeString, '\0', sizeofCypherTextMessageSizeString);
+    memset(buffer, '\0', sizeofBuffer);
     sprintf(cypherTextMessageSizeString, "%lu", strlen(cypherText));
-    charsWritten = send(socketFD, cypherTextMessageSizeString, strlen(cypherTextMessageSizeString) + 1, 0);
+    strcpy(buffer, cypherTextMessageSizeString);
+    charsWritten = send(socketFD, buffer, BUFFER_SIZE - 1, 0);
     if (charsWritten < 0) fprintf(stderr, "Error writing cypherTextMessageSizeString to server\n");
-    memset(ackToken, '\0', 15);
-    charsRead = recv(socketFD, ackToken, 14, 0); // ensuring that I get an ack from the server
+    memset(ackToken, '\0', sizeofAckToken);
+    charsRead = recv(socketFD, ackToken, lengthOfAck, 0); // ensuring that I get an ack from the server
+    if (charsRead < 0) perror("Error sending the ack after sending plainMessageSizeString\n");
 
 
+
+
+    /*
+     * Sending cypher
+     */
     int cypherTextSize = atoi(cypherTextMessageSizeString);
     int iterationsRemaining = (cypherTextSize / 100) + 1; // This value will hold the number of times I plan on looping.
     int count = 0;
@@ -168,9 +230,9 @@ int main(int argc, char *argv[]) {
         charsWritten = send(socketFD, cypherText + count, numberOfCharsToSend, 0);
         if (charsWritten < 0) fprintf(stderr, "CLIENT: ERROR writing cypherText to socket on iteration %d\n", count);
 
-        memset(ackToken, '\0', 15);
-        charsRead = recv(socketFD, ackToken, 14, 0); // ensuring that I get an ack from the server
-
+        memset(ackToken, '\0', sizeofBuffer);
+        charsRead = recv(socketFD, ackToken, lengthOfAck, 0); // ensuring that I get an ack from the server
+        if (charsRead < 0) fprintf(stderr, "Error sending ack in sending cypher  sending iteration \n");
         char* token = malloc(sizeof(char) * numberOfCharsToSend);
         for (int i = 0; i < numberOfCharsToSend; i++) {
             token[i] = (cypherText + count)[i];
@@ -186,8 +248,13 @@ int main(int argc, char *argv[]) {
 
 
 
-    // get plainText test from server
+
+    /*
+     * Getting plain text
+     */
     char* plainText = malloc(sizeof(char) * (cypherTextSize + 1));
+    size_t sizePlainText = sizeof(plainText);
+    memset(plainText, '\0', sizePlainText);
     iterations = 0;
     iterationsRemaining = (cypherTextSize / 100) + 1;
     count = 0;
@@ -196,10 +263,10 @@ int main(int argc, char *argv[]) {
         int numberOfCharsToReceive = (iterationsRemaining == 1) ? (cypherTextSize % 100) : 100;
         if (numberOfCharsToReceive == 0) numberOfCharsToReceive = 100;
 
-        memset(buffer, '\0', BUFFER_SIZE);
+        memset(buffer, '\0', sizeofBuffer);
         charsRead = recv(socketFD, buffer, numberOfCharsToReceive, 0);
         if (charsRead < 0) fprintf(stderr, "Error reading plainText text from socket on iteration %d \n", iterations);
-        charsWritten = send(socketFD, ack, 14, 0); // sending ack
+        charsWritten = send(socketFD, ack, lengthOfAck, 0); // sending ack
         strcat(plainText, buffer);
         count += numberOfCharsToReceive;
         iterationsRemaining--;

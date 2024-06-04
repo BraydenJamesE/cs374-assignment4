@@ -9,6 +9,7 @@
 
 #define BUFFER_SIZE 1024
 
+char* serverID = "2";
 char allowedChars[28] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ ";
 
 void error(const char *msg) {
@@ -42,8 +43,14 @@ void setupAddressStruct(struct sockaddr_in* address, int portNumber){
 int main(int argc, char *argv[]){
     int connectionSocket, charsRead, charsWritten;
     char buffer[BUFFER_SIZE];
+    size_t sizeofBuffer = sizeof(char) * BUFFER_SIZE;
     char ack[15] = "ACK: received.";
-    char* keyFile = malloc(sizeof(char) * 256);
+    int lengthOfAck = strlen(ack);
+    int ackTokenSize = 255;
+    char* ackToken = malloc(sizeof(char) * (ackTokenSize + 1));
+    int keyFileSize = 255;
+    char* keyFile = malloc(sizeof(char) * keyFileSize + 1);
+    size_t sizeofKeyFile = sizeof(keyFile);
     struct sockaddr_in serverAddress, clientAddress;
     socklen_t sizeOfClientInfo = sizeof(clientAddress);
 
@@ -79,50 +86,86 @@ int main(int argc, char *argv[]){
             fprintf(stderr, "ERROR on accept");
         }
 
-        printf("SERVER: Connected to client running at host %d port %d\n", ntohs(clientAddress.sin_addr.s_addr), ntohs(clientAddress.sin_port));
 
-        // Get the message from the client and display it
 
-        memset(buffer, '\0', 256);
+
+
+        /*
+         * Authenticating server and client ID's
+         */
+        char* clientIDToken = malloc(sizeof(char) * 256);
+        size_t sizeofClientIDToken = sizeof(clientIDToken);
+        memset(clientIDToken, '\0', sizeofClientIDToken);
+        charsWritten = send(connectionSocket, serverID, strlen(serverID), 0);
+        if (charsWritten < 0) perror("Error in writing to client the serverID\n");
+        charsRead = recv(connectionSocket, clientIDToken, 1, 0);
+        if (charsRead < 0) perror("Error reading the clientIDToken \n");
+//        printf("serverID: %s\n", clientIDToken);
+//        printf("strlen(serverID) + 1: %ld\n", strlen(serverID) + 1);
+//        printf("ClientIDToken: %s\n", clientIDToken);
+//        printf("ClientIDToken == serverID: %d\n", strcmp(clientIDToken, serverID) == 0);
+        if (strcmp(clientIDToken, serverID) != 0) {
+            perror("Client attempting to access server does not share access ID. CLosing the connection.. \n");
+            close(connectionSocket); // closing the connection
+            continue; // breaking out of this connection and re-running the loop.
+        }
+
+
+
+
+        /*
+        * Getting keySizeString
+        * */
+        memset(buffer, '\0', sizeofBuffer);
         // reading the Key Size from the socket
         charsRead = recv(connectionSocket, buffer, BUFFER_SIZE - 1, 0); // getting the length of the key
-        if (charsRead < 0){
-            error("ERROR reading Key Size from socket");
-        }
-        buffer[charsRead] = '\0';
-        charsWritten = send(connectionSocket, ack, 14, 0); // sending an ack to the client
+        if (charsRead < 0) perror("ERROR reading Key Size from socket");
+        charsWritten = send(connectionSocket, ack, lengthOfAck, 0); // sending an ack to the client
+        if (charsWritten < 0) perror("Error sending ack after receiving length of the key");
 
         int keyStringSize = 255;
         char* keySize = malloc(sizeof(char) * (keyStringSize + 1));
+        size_t sizeofKeySize = sizeof(keySize);
+        memset(keySize, '\0', sizeofKeySize);
         strcpy(keySize, buffer); // assigning the buffer value to the keySize
-        printf("SERVER: I received keyStringSize from the client: \"%s\"\n", keySize);
 
-        memset(buffer, '\0', 256);
+
+
+        /*
+         *  Getting the keyFile from the client
+         */
+        memset(buffer, '\0', sizeofBuffer);
         charsRead = recv(connectionSocket, buffer, BUFFER_SIZE - 1, 0); // getting the file path to the key
         if (charsRead < 0) fprintf(stderr, "ERROR reading Key Size from socket");
 
-        buffer[charsRead] = '\0';
         charsWritten = send(connectionSocket, ack, 14, 0); // sending an ack to the client for the keyFile
+        if (charsWritten < 0) perror("Error sending ack to the client for the keyfile\n");
+        memset(keyFile, '\0', sizeofKeyFile);
         strcpy(keyFile, buffer);
-        printf("Received the keyFile from the client: %s \n", keyFile);
 
 
-        memset(buffer, '\0', BUFFER_SIZE);
+
+        /*
+        *  Getting the plainMessageSizeString from client
+        */
+        memset(buffer, '\0', sizeofBuffer);
         charsRead = recv(connectionSocket, buffer, BUFFER_SIZE - 1, 0);
-        if (charsRead < 0) {
-            fprintf(stderr, "Error reading plain message size from socket\n");
-        }
-        buffer[charsRead] = '\0';
-        charsWritten = send(connectionSocket, ack, 14, 0); // sending an ack to the client
-        printf("SERVER: I received cypherTextSize from the client: %s \n", buffer);
+        if (charsRead < 0) fprintf(stderr, "Error reading plain message size from socket\n");
+        charsWritten = send(connectionSocket, ack, lengthOfAck, 0); // sending an ack to the client
         int cypherTextSize = atoi(buffer);
 
 
+
+        /*
+         * Getting cypher text
+         */
         int keySizeInt = atoi(keySize);
         int iterationsRemaining = (cypherTextSize / 100) + 1; // getting the number of iterations that it will take to send over the entire message in chunks of 100
         int count = 0;
-        char* cypherText = calloc(keySizeInt + 1, sizeof(char));
+        char* cypherText = malloc(sizeof(char) * (keySizeInt + 1));
         if (cypherText == NULL) fprintf(stderr, "Error allocating memory for cypherText \n");
+        size_t sizeofCypherText = sizeof(cypherText);
+        memset(cypherText, '\0', sizeofCypherText);
 
         int iterations = 0;
         while (iterationsRemaining != 0) {
@@ -131,15 +174,11 @@ int main(int argc, char *argv[]){
             if (numberOfCharsToReceive == 0) {
                 numberOfCharsToReceive = 100;
             }
-            memset(buffer, '\0', BUFFER_SIZE);
+            memset(buffer, '\0', sizeofBuffer);
             charsRead = recv(connectionSocket, buffer, numberOfCharsToReceive, 0); // getting a portion of the plain message from the client
-            if (charsRead < 0) {
-                fprintf(stderr, "Error reading cypher from socket on iteration %d \n", iterations);
-            }
-            charsWritten = send(connectionSocket, ack, 14, 0); // sending an ack to the client
-            printf("SERVER: I received cypher Text (iteration: %d) from the client: %s \n", iterations, buffer);
-            printf("Expected Chars Read: %d\n", numberOfCharsToReceive);
-            printf("Actual Chars Read: %d\n", charsRead);
+            if (charsRead < 0) fprintf(stderr, "Error reading cypher from socket on iteration %d \n", iterations);
+            charsWritten = send(connectionSocket, ack, lengthOfAck, 0); // sending an ack to the client
+            if (charsWritten < 0) fprintf(stderr, "Error sending ack when receiving cypher text\n");
 
             bool containsOnlyValidChars = false;
             char charOfInterest;
@@ -163,11 +202,18 @@ int main(int argc, char *argv[]){
             iterationsRemaining--;
         } // end of while loop
 
-        cypherText[strlen(cypherText)] = '\0'; // tacking on the null terminator
 
-        printf("cypherText: %s \n", cypherText);
 
+
+
+
+        /*
+         * Decrypting cypherText
+         */
         char* keyText = malloc(sizeof(char) * (keySizeInt + 1));
+        size_t sizeofKeyText = sizeof(keyText);
+        memset(keyText, '\0', sizeofKeyText);
+
         FILE* fileHandler = fopen(keyFile, "r");
         if (fileHandler == NULL) {
             fprintf(stderr, "Failed to open keyFile: %s \n", keyFile);
@@ -187,6 +233,8 @@ int main(int argc, char *argv[]){
             exit(EXIT_FAILURE);
         }
         char* plainText = malloc(sizeof(char) * (strlen(cypherText) + 1)); // creating the plainText string
+        size_t sizeofPlainText = sizeof(plainText);
+        memset(plainText, '\0', sizeofPlainText);
         for (int i = 0; i < strlen(cypherText); i++) { // encrypt the plainTextMessage
             int cypherTextIndex = getCharIndex(cypherText[i]);
             int keyCharIndex = getCharIndex(keyText[i]);
@@ -194,39 +242,35 @@ int main(int argc, char *argv[]){
             if (newCharIndex < 0) newCharIndex = newCharIndex + 27;
             char plainTextChar = allowedChars[newCharIndex];
             plainText[i] = plainTextChar;
-            printf("\n\n%d: \n", i);
-            printf("cypherTextIndex: %d\n", cypherTextIndex);
-            printf("keyCharIndex: %d\n", keyCharIndex);
-            printf("newCharIndex: %d\n", newCharIndex);
-            printf("plainTextChar: %c\n", plainTextChar);
-        } // end of for loop
-        plainText[strlen(plainText)] = '\0';
-        printf("PlainText: %s\n", plainText);
 
-        // send plainText text
+        } // end of for loop
+
+
+
+
+        /*
+         * Sending plain Text
+         */
         count = 0;
         iterations = 0;
         iterationsRemaining = (cypherTextSize / 100) + 1;
-        char* ackToken = malloc(sizeof(char) * (15));
         while (iterationsRemaining != 0) {
             iterations += 1;
             int numberOfCharsToSend = (iterationsRemaining == 1) ? (cypherTextSize % 100) : 100;
             if (numberOfCharsToSend == 0) numberOfCharsToSend = 100; // handling the situation where the number of chars to send is a multiple of 100.
             charsWritten = send(connectionSocket, plainText + count, numberOfCharsToSend, 0);
             if (charsWritten < 0) fprintf(stderr, "SERVER: ERROR writing plainText to socket on iteration %d\n", iterations);
-            memset(ackToken, '\0', 15);
-            charsRead = recv(connectionSocket, ackToken, 14, 0);
+            memset(ackToken, '\0', sizeofBuffer);
+            charsRead = recv(connectionSocket, ackToken, lengthOfAck, 0);
+            if (charsRead < 0) fprintf(stderr, "Error sending ack while sending plain text\n");
             count += numberOfCharsToSend;
             iterationsRemaining--; // decrementing iterationsRemaining
         } // end of while loop
 
 
-        printf("plainText Text: %s \n", plainText);
-
-        // Close the connection socket for this client
+        /*
+         * Closing
+         */
         close(connectionSocket);
     } // end of while loop
-    // Close the listening socket
-    close(listenSocket);
-    return 0;
 }
