@@ -7,12 +7,8 @@
 #include <sys/socket.h> // send(),recv()
 #include <netdb.h>      // gethostbyname()
 
-/**
-* Client code
-* 1. Create a socket and connect to the server specified in the command arugments.
-* 2. Prompt the user for input and send that input as a message to the server.
-* 3. Print the message received from the server and exit the program.
-*/
+
+#define BUFFER_SIZE 1024
 
 long getFileSize(const char *filename) {
     FILE *file = fopen(filename, "r");  // open the file in read mode
@@ -59,6 +55,7 @@ void setupAddressStruct(struct sockaddr_in* address, int portNumber, char* hostn
 int main(int argc, char *argv[]) {
     int socketFD, portNumber, charsWritten, charsRead;
     struct sockaddr_in serverAddress;
+    char buffer[BUFFER_SIZE];
     char ack[15] = "ACK: received.";
     char* ackToken = malloc(sizeof(char) * (15));
     // Check usage & args
@@ -113,8 +110,7 @@ int main(int argc, char *argv[]) {
     } // end of while loop (true)
     fclose(fileHandler);
     plainTextMessage[charCounter] = '\0';
-    printf("PlainTextMessage:\n %s\n", plainTextMessage);
-    printf("PlainTextMessage: %ld\n", strlen(plainTextMessage));
+
 
     // Create a socket
     socketFD = socket(AF_INET, SOCK_STREAM, 0);
@@ -148,16 +144,13 @@ int main(int argc, char *argv[]) {
     if (charsWritten < 0) {
         error("CLIENT: ERROR writing to socket");
     }
-    if (charsWritten < strlen(keySizeString)) {
-        printf("CLIENT: WARNING: Not all data written to socket!\n");
-    }
-    printf("CLIENT: I sent KeySizeString to the server: %s\n", keySizeString);
+    if (charsWritten < strlen(keySizeString)) fprintf(stderr, "CLIENT: WARNING: Not all data written to socket!\n");
+
 
     char* plainTextMessageSizeString = malloc(sizeof(char) * (strlen(plainTextMessage) + 1));
     sprintf(plainTextMessageSizeString, "%lu", strlen(plainTextMessage));
     charsWritten = send(socketFD, plainTextMessageSizeString, strlen(plainTextMessageSizeString) + 1, 0);
     if (charsWritten < 0) fprintf(stderr, "Error writing plainMessageSizeString to server\n");
-    printf("CLIENT: I sent plainTextMessageSizeString to the server: %s\n", plainTextMessageSizeString);
     memset(ackToken, '\0', 15);
     charsRead = recv(socketFD, ackToken, 14, 0); // ensuring that I get an ack from the server
 
@@ -172,8 +165,6 @@ int main(int argc, char *argv[]) {
             numberOfCharsToSend = 100; // handling the situation where the number of chars to send is a multiple of 100.
         }
 
-        printf("numberOfCharsToReceive: %d\n", numberOfCharsToSend);
-
         charsWritten = send(socketFD, plainTextMessage + count, numberOfCharsToSend, 0);
         if (charsWritten < 0) fprintf(stderr, "CLIENT: ERROR writing plaintextMessage to socket on iteration %d\n", count);
 
@@ -184,11 +175,7 @@ int main(int argc, char *argv[]) {
         for (int i = 0; i < numberOfCharsToSend; i++) {
             token[i] = (plainTextMessage + count)[i];
         }
-        printf("CLIENT: I sent plaintextMessage (iteration: %d) to the server: %s\n", iterations, token);
-        printf("Expected chars Written: %d \n", numberOfCharsToSend);
-        printf("Actual chars Written: %d \n", charsWritten);
 
-        printf("chars Written: %d\n", charsWritten);
         if (charsWritten < 0) fprintf(stderr, "Error sending data\n");
 
         if (charsWritten < numberOfCharsToSend) fprintf(stderr, "CLIENT: WARNING: Not all data written to socket!\n");
@@ -197,8 +184,28 @@ int main(int argc, char *argv[]) {
         free(token);
     } // end while loop
 
+    // get encrypted test from server
+    char* encryptedText = malloc(sizeof(char) * (plainTextSize + 1));
+    iterations = 0;
+    iterationsRemaining = (plainTextSize / 100) + 1;
+    count = 0;
+    while (iterationsRemaining != 0) {
+        iterations += 1;
+        int numberOfCharsToReceive = (iterationsRemaining == 1) ? (plainTextSize % 100) : 100;
+        if (numberOfCharsToReceive == 0) numberOfCharsToReceive = 100;
+
+        memset(buffer, '\0', BUFFER_SIZE);
+        charsRead = recv(socketFD, buffer, numberOfCharsToReceive, 0);
+        if (charsRead < 0) fprintf(stderr, "Error reading encrypted text from socket on iteration %d \n", iterations);
+
+        charsWritten = send(socketFD, ack, 14, 0); // sending ack
+        strcat(encryptedText, buffer);
+        count += numberOfCharsToReceive;
+        iterationsRemaining -= 1;
+    } // end of while loop
 
 
+    printf("%s\n", encryptedText);
     close(socketFD); // Close the socket
     free(plainTextMessage);
     return 0;

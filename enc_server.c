@@ -134,7 +134,7 @@ int main(int argc, char *argv[]){
             memset(buffer, '\0', BUFFER_SIZE);
             charsRead = recv(connectionSocket, buffer, numberOfCharsToReceive, 0); // getting a portion of the plain message from the client
             if (charsRead < 0) {
-                fprintf(stderr, "Error reading plaintext from socket on iteration %d \n", count);
+                fprintf(stderr, "Error reading plaintext from socket on iteration %d \n", iterations);
             }
             charsWritten = send(connectionSocket, ack, 14, 0); // sending an ack to the client
             printf("SERVER: I received plainMessage (iteration: %d) from the client: %s \n", iterations, buffer);
@@ -195,7 +195,24 @@ int main(int argc, char *argv[]){
             encryptedText[i] = encryptedChar;
         } // end of for loop
 
-        printf("PlainText: %s \n", plainTextMessage);
+        // send encrypted text
+        count = 0;
+        iterations = 0;
+        iterationsRemaining = (plainMessageSize / 100) + 1;
+        char* ackToken = malloc(sizeof(char) * (15));
+        while (iterationsRemaining != 0) {
+            iterations += 1;
+            int numberOfCharsToSend = (iterationsRemaining == 1) ? (plainMessageSize % 100) : 100;
+            if (numberOfCharsToSend == 0) numberOfCharsToSend = 100; // handling the situation where the number of chars to send is a multiple of 100.
+            charsWritten = send(connectionSocket, encryptedText + count, numberOfCharsToSend, 0);
+            if (charsWritten < 0) fprintf(stderr, "SERVER: ERROR writing encrypted to socket on iteration %d\n", iterations);
+            memset(ackToken, '\0', 15);
+            charsRead = recv(connectionSocket, ackToken, 14, 0);
+            count += numberOfCharsToSend;
+            iterationsRemaining--; // decrementing iterationsRemaining
+        } // end of while loop
+
+
         printf("Encrypted Text: %s \n", encryptedText);
 
         // Close the connection socket for this client
